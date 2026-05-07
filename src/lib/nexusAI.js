@@ -85,34 +85,35 @@ export async function remChat(message, conversationHistory = []) {
   try {
     const state = await getRemState();
     
-    // 1. Intentar Ollama (Gemma 2B)
+    // 1. SIEMPRE buscar en internet primero (Wikipedia + DuckDuckGo)
+    const search = await smartSearch(message);
+    
     let response;
-    try {
-      const prompt = `${REM_PERSONALITY}\n\nUsuario: ${message}\nRem:`;
-      const res = await fetch(OLLAMA_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'gemma2:2b', prompt, stream: false })
-      });
-      const data = await res.json();
-      response = data.response.trim();
-    } catch (e) {
-      // 2. Buscar en internet (Wikipedia + DuckDuckGo GRATIS)
-      const search = await smartSearch(message);
+    if (search.content) {
+      // Guardar aprendizaje
+      try {
+        await supabase.from('learning_log').insert({
+          action: 'internet_search',
+          result: search.title || message,
+          score: 8,
+          modifiers: [search.source]
+        });
+      } catch (err) {}
       
-      if (search.content) {
-        // Guardar lo aprendido
-        try {
-          await supabase.from('learning_log').insert({
-            action: 'internet_search',
-            result: search.title || message,
-            score: 8,
-            modifiers: [search.source]
-          });
-        } catch (err) {}
-        
-        response = `✦ Rem investigó en ${search.source} sobre "${message}" y esto aprendió:\n\n${search.content}\n\n¿Quiere que profundice en algo, Goshujin-sama?`;
-      } else {
+      response = `✦ Rem investigó en ${search.source} sobre "${message}" y esto aprendió:\n\n${search.content}\n\n¿Quiere que profundice en algo, Goshujin-sama?`;
+    } else {
+      // 2. Si no hay internet, intentar Ollama
+      try {
+        const prompt = `${REM_PERSONALITY}\n\nUsuario: ${message}\nRem:`;
+        const res = await fetch(OLLAMA_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'gemma2:2b', prompt, stream: false })
+        });
+        const data = await res.json();
+        response = data.response.trim();
+      } catch (e2) {
+        // 3. Si nada funciona, respuesta local
         response = localResponse(message);
       }
     }
