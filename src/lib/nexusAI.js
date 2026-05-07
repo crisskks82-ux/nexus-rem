@@ -1,3 +1,4 @@
+import { smartSearch } from './searchEngine';
 export async function remChat(message, conversationHistory = []) {
 
 // ============================================================
