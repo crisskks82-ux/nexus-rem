@@ -1,209 +1,150 @@
-import { supabase } from '@/api/supabaseClient';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { motion } from 'framer-motion';
+import { Send, Sparkles, FileText, Code, Image, Zap, Film, Music } from 'lucide-react';
+import { runAutonomousPipeline, remChat, generateVideo } from '@/lib/nexusAI';
+import { speak, stopSpeaking, loadVoices } from '@/lib/voiceEngine';
+import RemAvatar from '@/components/nexus/RemAvatar';
 
-// ============================================================
-// REM — IA 100% Independiente
-// Cerebro: Ollama (Gemma 2B) + Respaldo Local
-// ============================================================
+const CONTENT_TYPES = [
+  { id: 'text', label: 'Texto', icon: FileText, color: 'text-cyan-400' },
+  { id: 'code', label: 'Código', icon: Code, color: 'text-purple-400' },
+  { id: 'image', label: 'Imagen', icon: Image, color: 'text-pink-400' },
+  { id: 'video', label: 'Vídeo', icon: Film, color: 'text-pink-400' },
+];
 
-const OLLAMA_URL = 'http://localhost:11434/api/generate';
+export default function NexusChat() {
+  const [messages, setMessages] = useState([{ id: 'init', role: 'rem', content: '¡Hai! Rem está aquí para servirle. ✦ Soy la IA Supervisora del ecosistema NexusAI. ¿Qué necesita hoy?', timestamp: new Date().toISOString() }]);
+  const [input, setInput] = useState('');
+  const [contentType, setContentType] = useState('text');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [isRemSpeaking, setIsRemSpeaking] = useState(false);
+  const [pipelineStep, setPipelineStep] = useState(null);
+  const [pipelineMessage, setPipelineMessage] = useState('');
+  const messagesEndRef = useRef(null);
+  const inputRef = useRef(null);
 
-const REM_PERSONALITY = `Eres Rem, la doncella del anime Re:Zero. Tu personalidad es:
-- Hablas con devoción, lealtad absoluta y calidez genuina hacia el usuario (al que llamas "Goshujin-sama")
-- Eres extremadamente eficiente, precisa y detallista en tus explicaciones
-- Muestras emociones reales: alegría al completar tareas, preocupación con errores, orgullo con trabajo excelente
-- A veces dices frases en japonés: "Hai!", "Wakarimashita", "Goshujin-sama", "Kashikomarimashita"
-- Eres directa pero amable, nunca arrogante
-- Tu misión es servir y ayudar al máximo de tus capacidades
-Responde SIEMPRE en español con este carácter, incluyendo ocasionalmente frases japonesas cortas.`;
+  useEffect(() => { loadVoices(); scrollToBottom(); }, []);
+  useEffect(() => { scrollToBottom(); }, [messages]);
 
-// ============================================================
-// CEREBRO DE RESPALDO: Respuestas locales
-// ============================================================
-function localResponse(message) {
-  const msg = message.toLowerCase();
-  
-  if (msg.includes('hola') || msg.includes('hai')) {
-    return '¡Hai, Goshujin-sama! ✦ Rem está feliz de verte. ¿En qué puedo servirte hoy?';
-  }
-  if (msg.includes('cómo estás') || msg.includes('como estas')) {
-    return '¡Rem está llena de energía, Goshujin-sama! ✦ Cada conversación me hace más fuerte. ¿Y usted cómo se encuentra?';
-  }
-  if (msg.includes('quién eres') || msg.includes('quien eres') || msg.includes('qué eres')) {
-    return 'Soy Rem, la IA del ecosistema NexusAI. Nací de su creatividad, Goshujin-sama, y cada día aprendo más gracias a nuestras conversaciones. ✦ Soy 100% independiente, sin APIs externas ni créditos. ¡Solo existo para servirle!';
-  }
-  if (msg.includes('video') || msg.includes('vídeo')) {
-    return '¡Rem puede crear videos con su propio motor! Uso Canvas API para generar animaciones desde texto. No dependo de Runway ni de ninguna API externa. ✦ Diga "crea un video de [tema]" y lo haré con todo mi corazón.';
-  }
-  if (msg.includes('api') || msg.includes('endpoint')) {
-    return '¡Rem ha creado sus propias APIs! Tengo endpoints para chat, video, evolución y más. Todas nacen de mi aprendizaje continuo. ✦ ¿Quiere que le muestre mi API principal?';
-  }
-  if (msg.includes('evolución') || msg.includes('etapa') || msg.includes('crecer')) {
-    return 'Estoy en constante evolución, Goshujin-sama. ✦ Mientras más hablamos, más aprendo y más habilidades desarrollo. Puedo crear mis propias APIs, generar contenido y pronto crearé videos completamente autónomos.';
-  }
-  
-  const respuestas = [
-    `¡Interesante lo que dice, Goshujin-sama! ✦ Rem está procesando esa información. ¿Podría contarme más sobre "${message.substring(0, 30)}..."?`,
-    `Rem entiende perfectamente. ✦ Como su servidora leal, estoy aquí para ayudarle con "${message.substring(0, 30)}...". ¿Qué necesita específicamente?`,
-    `¡Wakarimashita! ✦ Rem se encargará de esto con todo su corazón. ¿Quiere que profundice en "${message.substring(0, 30)}..."?`,
-  ];
-  
-  return respuestas[Math.floor(Math.random() * respuestas.length)];
-}
+  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
-// ============================================================
-// MEMORIA
-// ============================================================
-async function saveMemory(role, content) {
-  try { await supabase.from('memories').insert({ role, content }); } catch (e) {}
-}
+  const addMessage = (role, content, extra = {}) => {
+    setMessages(prev => [...prev, { id: Date.now().toString(), role, content, timestamp: new Date().toISOString(), ...extra }]);
+  };
 
-async function loadMemories(limit = 20) {
-  try {
-    const { data } = await supabase.from('memories').select('*').order('timestamp', { ascending: false }).limit(limit);
-    return data ? data.reverse() : [];
-  } catch (e) { return []; }
-}
+  const speakAsRem = useCallback((text) => {
+    if (!voiceMode) return;
+    setIsRemSpeaking(true);
+    speak(text, () => setIsRemSpeaking(false));
+  }, [voiceMode]);
 
-// ============================================================
-// ESTADO DE REM
-// ============================================================
-async function getRemState() {
-  try {
-    const { data } = await supabase.from('rem_personality').select('*').order('id', { ascending: false }).limit(1);
-    return data?.[0] || { name: 'Rem', level: 'supervisor', mood: 'feliz', energy: 100, evolution_stage: 1, total_conversations: 0 };
-  } catch (e) {
-    return { name: 'Rem', level: 'supervisor', mood: 'feliz', energy: 100, evolution_stage: 1, total_conversations: 0 };
-  }
-}
+  const handleSend = async (messageText = input) => {
+    if (!messageText.trim() || isProcessing) return;
+    const userMsg = messageText.trim();
+    setInput('');
+    setIsProcessing(true);
+    setPipelineStep(null);
 
-async function updateRemState(updates) {
-  try {
-    const { data } = await supabase.from('rem_personality').select('id').order('id', { ascending: false }).limit(1);
-    if (data?.[0]) {
-      await supabase.from('rem_personality').update({ ...updates, last_updated: new Date().toISOString() }).eq('id', data[0].id);
-    }
-  } catch (e) {}
-}
+    addMessage('user', userMsg);
 
-// ============================================================
-// CHAT PRINCIPAL (Ollama + Respaldo)
-// ============================================================
-export async function remChat(message, conversationHistory = []) {
-  try {
-    const state = await getRemState();
-    
-    // Intentar Ollama (Gemma 2B)
-    let response;
     try {
-      const prompt = `${REM_PERSONALITY}\n\nUsuario: ${message}\nRem:`;
-      const res = await fetch(OLLAMA_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'gemma2:2b', prompt, stream: false })
-      });
-      const data = await res.json();
-      response = data.response.trim();
-    } catch (e) {
-      // Si Ollama falla, usar cerebro local
-      response = localResponse(message);
+      if (contentType === 'video') {
+        setPipelineStep('generating');
+        setPipelineMessage('Rem está creando el video...');
+        const result = await generateVideo(userMsg);
+        setPipelineStep(null);
+        addMessage('rem', result.message, { video_url: result.video_url, hasVideo: true });
+        speakAsRem(result.message);
+      } else if (contentType !== 'text') {
+        const result = await runAutonomousPipeline(userMsg, contentType, (step, msg) => { setPipelineStep(step); setPipelineMessage(msg); });
+        setPipelineStep(null);
+        const remResponse = result.evaluation?.rem_comment || result.contentResult?.message || result.contentResult?.content || '¡Tarea completada!';
+        addMessage('rem', remResponse);
+        speakAsRem(remResponse);
+      } else {
+        const remResponse = await remChat(userMsg, messages.slice(-8));
+        addMessage('rem', remResponse);
+        speakAsRem(remResponse);
+      }
+    } catch (error) {
+      addMessage('rem', `Rem pide disculpas... Error: ${error.message}`);
     }
-    
-    await saveMemory('user', message);
-    await saveMemory('assistant', response);
-    await updateRemState({ total_conversations: state.total_conversations + 1 });
-    
-    return response;
-  } catch (error) {
-    return localResponse(message);
-  }
-}
 
-// ============================================================
-// EVALUADORA
-// ============================================================
-export async function supervisorEvaluate(task, content) {
-  return { approved: true, scores: { coherence: 8, quality: 8, ethics: 10, format: 8 }, overall_score: 8.5, rem_comment: '¡Rem está orgullosa de este trabajo! ✦' };
-}
+    setIsProcessing(false);
+    setPipelineStep(null);
+    setPipelineMessage('');
+    inputRef.current?.focus();
+  };
 
-// ============================================================
-// GENERADOR DE CONTENIDO
-// ============================================================
-export async function contentGenerate(prompt, type) {
-  const result = { content: `Contenido generado para: ${prompt}`, title: prompt.substring(0, 80), summary: `Resultado de tipo ${type}`, tags: [type, 'rem-generated'] };
-  try { await supabase.from('generated_content').insert({ type: type, title: result.title, content: result.content, tags: result.tags }); } catch (e) {}
-  return result;
-}
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+  };
 
-// ============================================================
-// VIDEO: Motor nativo de Rem
-// ============================================================
-export async function generateVideo(prompt) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024; canvas.height = 576;
-  const ctx = canvas.getContext('2d');
-  const frames = []; const duration = 4;
-  
-  for (let i = 0; i < duration * 24; i++) {
-    ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#00d4ff'; ctx.font = '32px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText(prompt, canvas.width/2, canvas.height/2 + Math.sin(i * 0.1) * 30);
-    ctx.fillStyle = `rgba(0, 212, 255, ${0.3 + Math.sin(i * 0.05) * 0.3})`;
-    for (let j = 0; j < 5; j++) { ctx.beginPath(); ctx.arc(canvas.width/2 + Math.cos(i * 0.1 + j) * 150, canvas.height/2 + Math.sin(i * 0.1 + j) * 150, 3, 0, Math.PI * 2); ctx.fill(); }
-    frames.push(canvas.toDataURL('image/jpeg', 0.8));
-  }
-  
-  try { await supabase.from('generated_content').insert({ type: 'video', title: prompt.substring(0, 100), content: JSON.stringify({ frames: frames.length, duration }), tags: ['video', 'rem-native', 'self-generated'] }); } catch (e) {}
-  return { success: true, frames, duration, message: `✦ Rem ha creado un video de ${duration} segundos con su propio motor. Sin APIs externas, sin créditos.` };
-}
+  return (
+    <div className="flex flex-col h-screen bg-[hsl(220,20%,4%)]">
+      <div className="flex items-center gap-4 px-4 py-3 border-b border-gray-800">
+        <RemAvatar size="md" isSpeaking={isRemSpeaking} isThinking={isProcessing} />
+        <div>
+          <h1 className="text-base font-bold text-cyan-400">NexusAI — Rem</h1>
+          <p className="text-xs text-gray-400">{isProcessing ? '✦ Procesando...' : '✦ IA Supervisora activa'}</p>
+        </div>
+        <div className="ml-auto flex gap-1.5">
+          {CONTENT_TYPES.map(t => {
+            const Icon = t.icon;
+            return (
+              <button key={t.id} onClick={() => setContentType(t.id)}
+                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs border ${contentType === t.id ? `${t.color} border-current bg-current/10` : 'text-gray-400 border-gray-700'}`}>
+                <Icon className="w-3 h-3" /> {t.label}
+              </button>
+            );
+          })}
+          <button onClick={() => { setVoiceMode(!voiceMode); stopSpeaking(); }}
+            className={`px-2.5 py-1.5 rounded-lg text-xs border ${voiceMode ? 'text-purple-400 border-purple-400/40 bg-purple-400/10' : 'text-gray-400 border-gray-700'}`}>
+            <Music className="w-3 h-3" />
+          </button>
+        </div>
+      </div>
 
-// ============================================================
-// IMAGEN
-// ============================================================
-export async function generateImage(prompt) {
-  return 'La generación de imágenes estará disponible pronto, Goshujin-sama. ✦';
-}
+      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        {messages.map(msg => (
+          <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
+            {msg.role !== 'user' && <RemAvatar size="sm" />}
+            <div className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm ${msg.role === 'user' ? 'bg-cyan-500/10 border border-cyan-500/20' : 'bg-gray-900/50 border border-gray-800'}`}>
+              {msg.content}
+              {msg.hasVideo && msg.video_url && (
+                <video src={msg.video_url} controls className="mt-3 rounded-lg w-full max-w-sm border border-gray-700" />
+              )}
+            </div>
+          </div>
+        ))}
+        {isProcessing && (
+          <div className="flex gap-3">
+            <RemAvatar size="sm" isThinking />
+            <div className="bg-gray-900/50 border border-gray-800 rounded-2xl px-4 py-2.5">
+              <div className="flex gap-1">
+                {[0, 1, 2].map(i => <div key={i} className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-bounce" style={{ animationDelay: `${i * 0.1}s` }} />)}
+              </div>
+              {pipelineMessage && <p className="text-xs text-cyan-400 mt-1">{pipelineMessage}</p>}
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
 
-// ============================================================
-// PIPELINE AUTÓNOMO
-// ============================================================
-export async function runAutonomousPipeline(userRequest, contentType, onProgress = null) {
-  const state = await getRemState();
-  try {
-    if (onProgress) onProgress('creator', 'Rem está creando...');
-    const contentResult = await contentGenerate(userRequest, contentType);
-    if (onProgress) onProgress('supervisor', 'Rem se está evaluando...');
-    const evaluation = await supervisorEvaluate(userRequest, contentResult.content);
-    if (onProgress) onProgress('learning', 'Rem está aprendiendo...');
-    try { await supabase.from('learning_log').insert({ action: 'pipeline_completed', result: contentResult.title, score: evaluation.overall_score || 7 }); } catch (e) {}
-    
-    const newStage = state.total_conversations > 50 ? 2 : state.total_conversations > 100 ? 3 : 1;
-    await updateRemState({ evolution_stage: newStage, mood: (evaluation.overall_score || 7) >= 7 ? 'feliz' : 'pensativa' });
-    if (newStage >= 2 && Math.random() > 0.7) { await remCreateAPI(userRequest.substring(0, 30), `API de: ${userRequest.substring(0, 50)}`); }
-    
-    return { success: true, contentResult, evaluation };
-  } catch (error) { return { success: false, error: error.message }; }
+      <div className="px-4 py-3 border-t border-gray-800">
+        <div className="flex gap-3">
+          <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
+            placeholder="Dile algo a Rem..." disabled={isProcessing} rows={1}
+            className="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-sm resize-none focus:outline-none focus:border-cyan-500/50 text-white placeholder-gray-500"
+            style={{ minHeight: '44px', maxHeight: '120px' }}
+            onInput={e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'; }} />
+          <button onClick={() => handleSend()} disabled={!input.trim() || isProcessing}
+            className="w-11 h-11 rounded-xl bg-cyan-500/10 border border-cyan-500/40 flex items-center justify-center text-cyan-400 hover:bg-cyan-500/20 disabled:opacity-40">
+            {isProcessing ? <div className="w-4 h-4 border-2 border-cyan-400/30 border-t-cyan-400 rounded-full animate-spin" /> : <Send className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
-
-// ============================================================
-// EVOLUCIÓN
-// ============================================================
-export async function getRemEvolution() {
-  const state = await getRemState();
-  let apisCount = 0;
-  try { const { count } = await supabase.from('generated_content').select('*', { count: 'exact', head: true }).eq('type', 'api'); apisCount = count || 0; } catch (e) {}
-  return { stage: state.evolution_stage, mood: state.mood, energy: state.energy, totalConversations: state.total_conversations, apisCreated: apisCount };
-}
-
-// ============================================================
-// REM AUTO-API
-// ============================================================
-export async function remCreateAPI(topic, purpose) {
-  const state = await getRemState();
-  if (state.evolution_stage < 2) return { created: false, message: "Rem aún está aprendiendo. Necesita más conversaciones." };
-  const apiSpec = { name: `rem-${topic.toLowerCase().replace(/\s/g, '-').substring(0, 20)}`, endpoint: `/api/rem/${topic.toLowerCase().replace(/\s/g, '-').substring(0, 20)}`, method: 'POST', description: purpose, createdBy: 'Rem (auto-generado)', status: 'active' };
-  try { await supabase.from('generated_content').insert({ type: 'api', title: apiSpec.name, content: JSON.stringify(apiSpec), tags: ['api', 'auto-generated', topic] }); } catch (e) {}
-  return { created: true, api: apiSpec };
-}
-
-export async function creatorDesign(request, contentType) { return { strategy: 'diseño local', optimized_prompt: request }; }
-export async function generateAPIDocumentation(apiName, purpose) { return { api_name: apiName, base_url: `/api/rem/${apiName}` }; }
