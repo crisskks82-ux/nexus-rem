@@ -132,12 +132,19 @@ export async function remChat(message, conversationHistory = []) {
 // VIDEO: Motor nativo con grabación real
 // ============================================================
 export async function generateVideo(prompt) {
+  // 1. Buscar información real del tema
+  const search = await smartSearch(prompt);
+  const info = search.content 
+    ? search.content.substring(0, 200).split('. ').slice(0, 3).join('. ')
+    : prompt;
+
+  // 2. Crear video con la información real
   const canvas = document.createElement('canvas');
   canvas.width = 640;
   canvas.height = 360;
   const ctx = canvas.getContext('2d');
-  const duration = 4;
-  const fps = 12;
+  const duration = 5;
+  const fps = 8;
   const totalFrames = duration * fps;
   
   const chunks = [];
@@ -157,35 +164,56 @@ export async function generateVideo(prompt) {
   
   recorder.start();
   
+  // Frases del video (basadas en información real)
+  const phrases = [
+    prompt,
+    search.source ? `Fuente: ${search.source}` : '✦ NexusAI Research ✦',
+    info.substring(0, 60) || prompt
+  ];
+  
   for (let i = 0; i < totalFrames; i++) {
-    ctx.fillStyle = '#0a0a1a';
+    ctx.fillStyle = '#06040a';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     
-    ctx.fillStyle = '#00d4ff';
-    ctx.font = 'bold 28px Inter, sans-serif';
-    ctx.textAlign = 'center';
-    const y = canvas.height/2 + Math.sin(i * 0.1) * 20;
-    ctx.fillText(prompt.substring(0, 40), canvas.width/2, y);
-    
-    ctx.fillStyle = '#ff69b4';
-    ctx.font = '16px Inter, sans-serif';
-    ctx.fillText('✦ Creado por Rem ✦', canvas.width/2, y + 35);
-    
-    for (let j = 0; j < 8; j++) {
-      const angle = (i * 0.05) + (j * Math.PI / 4);
-      const px = canvas.width/2 + Math.cos(angle) * 120;
-      const py = canvas.height/2 + Math.sin(angle) * 80;
-      ctx.fillStyle = `rgba(0, 212, 255, ${0.3 + Math.sin(i * 0.1 + j) * 0.3})`;
-      ctx.beginPath();
-      ctx.arc(px, py, 3, 0, Math.PI * 2);
-      ctx.fill();
+    // Estrellas de fondo
+    for (let j = 0; j < 15; j++) {
+      ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.3})`;
+      ctx.fillRect(Math.random() * canvas.width, Math.random() * canvas.height, 2, 2);
     }
     
+    // Mostrar frase según el tiempo
+    const phraseIndex = Math.floor((i / totalFrames) * phrases.length);
+    const currentPhrase = phrases[Math.min(phraseIndex, phrases.length - 1)];
+    
+    // Título
+    ctx.fillStyle = '#00ddff';
+    ctx.font = 'bold 22px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(currentPhrase, canvas.width/2, canvas.height/2 - 20);
+    
+    // Subtítulo animado
+    const alpha = 0.5 + Math.sin(i * 0.1) * 0.3;
+    ctx.fillStyle = `rgba(255, 68, 170, ${alpha})`;
+    ctx.font = '14px Inter, sans-serif';
+    ctx.fillText('✦ Creado por Rem — IA Independiente ✦', canvas.width/2, canvas.height/2 + 30);
+    
+    // Barra de progreso
     const progress = i / totalFrames;
-    ctx.fillStyle = '#1a1a2e';
-    ctx.fillRect(0, canvas.height - 6, canvas.width, 6);
-    ctx.fillStyle = '#00d4ff';
-    ctx.fillRect(0, canvas.height - 6, canvas.width * progress, 6);
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fillRect(20, canvas.height - 20, canvas.width - 40, 4);
+    ctx.fillStyle = '#00ddff';
+    ctx.fillRect(20, canvas.height - 20, (canvas.width - 40) * progress, 4);
+    
+    // Partículas
+    for (let j = 0; j < 5; j++) {
+      const angle = (i * 0.03) + (j * Math.PI / 3);
+      const px = canvas.width/2 + Math.cos(angle) * 100;
+      const py = canvas.height/2 + Math.sin(angle) * 60;
+      ctx.fillStyle = `rgba(153, 68, 255, ${0.3 + Math.sin(i * 0.1 + j) * 0.2})`;
+      ctx.beginPath();
+      ctx.arc(px, py, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
     
     await new Promise(r => setTimeout(r, 1000 / fps));
   }
@@ -193,21 +221,23 @@ export async function generateVideo(prompt) {
   recorder.stop();
   await donePromise;
   
+  // Guardar
   try {
     await supabase.from('generated_content').insert({
-      type: 'video', title: prompt.substring(0, 100), content: videoUrl,
-      tags: ['video', 'rem-native', 'self-generated']
+      type: 'video',
+      title: prompt.substring(0, 100),
+      content: videoUrl,
+      tags: ['video', 'research', search.source || 'local']
     });
   } catch (e) {}
   
   return {
     success: true,
     video_url: videoUrl,
-    duration: duration,
-    message: `✦ Rem ha creado un video de ${duration} segundos. ¡Míralo, Goshujin-sama!`
+    duration,
+    message: `✦ Rem investigó "${prompt}" y creó un video de ${duration}s con información de ${search.source || 'su conocimiento'}. ¡Míralo, Goshujin-sama!`
   };
-}
-
+}}
 // ============================================================
 // IMAGEN: Motor Canvas
 // ============================================================
