@@ -1,104 +1,105 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Shield, Sparkles, Activity, CheckCircle, Zap, Code, Star, Clock } from 'lucide-react';
-import { base44 } from '@/api/base44Client';
+import { Sparkles, MessageSquare, Film, BarChart2, Activity, Zap, Code, Star } from 'lucide-react';
+import { supabase } from '@/api/supabaseClient';
 
 export default function NexusDashboard() {
   const [tasks, setTasks] = useState([]);
   const [apis, setApis] = useState([]);
-  const [logs, setLogs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [state, setState] = useState({ stage: 1, mood: 'feliz', totalConversations: 0, apisCreated: 0 });
 
   useEffect(() => {
     loadData();
-    const u1 = base44.entities.Task.subscribe(() => loadData());
-    const u2 = base44.entities.GeneratedAPI.subscribe(() => loadData());
-    const u3 = base44.entities.AuditLog.subscribe(() => loadData());
-    return () => { u1(); u2(); u3(); };
   }, []);
 
-const loadData = async () => {
-  try {
-    const [t, a, l] = await Promise.all([
-      base44.entities.Task.list('-created_date', 100),
-      base44.entities.GeneratedAPI.list('-created_date', 50),
-      base44.entities.AuditLog.list('-created_date', 200)
-    ]);
-    // Aseguramos que siempre sean arrays
-    setTasks(Array.isArray(t) ? t : (t?.data ? t.data : []));
-    setApis(Array.isArray(a) ? a : (a?.data ? a.data : []));
-    setLogs(Array.isArray(l) ? l : (l?.data ? l.data : []));
-  } catch (e) {
-    console.error('Error loading data:', e);
-    setTasks([]);
-    setApis([]);
-    setLogs([]);
-  }
-  setLoading(false);
-};
-
-  const tasksArray = Array.isArray(tasks) ? tasks : [];
-  const completedTasks = tasksArray.filter(t => t.status === 'completed').length;
-  const processingTasks = tasksArray.filter(t => t.status === 'processing').length;
-  const avgQuality = tasksArray.filter(t => t.quality_score).reduce((acc, t) => acc + t.quality_score, 0) / (tasksArray.filter(t => t.quality_score).length || 1);
+  const loadData = async () => {
+    try {
+      const { data: t } = await supabase.from('generated_content').select('*').order('created_at', { ascending: false }).limit(10);
+      const { data: a } = await supabase.from('generated_content').select('*', { count: 'exact', head: true }).eq('type', 'api');
+      const { data: s } = await supabase.from('rem_personality').select('*').order('id', { ascending: false }).limit(1);
+      setTasks(t || []);
+      setApis(a || []);
+      if (s?.[0]) setState({ stage: s[0].evolution_stage || 1, mood: s[0].mood || 'feliz', totalConversations: s[0].total_conversations || 0, apisCreated: a?.length || 0 });
+    } catch (e) {}
+  };
 
   const STATS = [
-    { label: 'Tareas Completadas', value: completedTasks, icon: CheckCircle, color: 'text-green-400' },
-    { label: 'Procesando', value: processingTasks, icon: Zap, color: 'text-yellow-400' },
-    { label: 'APIs Generadas', value: Array.isArray(apis) ? apis.length : 0, icon: Code, color: 'text-purple-400' },
-    { label: 'Calidad Promedio', value: `${avgQuality.toFixed(1)}/10`, icon: Star, color: 'text-cyan-400' },
-    { label: 'Eventos', value: Array.isArray(logs) ? logs.length : 0, icon: Activity, color: 'text-pink-400' },
+    { label: 'Conversaciones', value: state.totalConversations, icon: MessageSquare, color: '#00ddff', glow: 'rgba(0,221,255,0.3)' },
+    { label: 'APIs Creadas', value: state.apisCreated, icon: Code, color: '#9944ff', glow: 'rgba(153,68,255,0.3)' },
+    { label: 'Etapa', value: state.stage, icon: Sparkles, color: '#ff44aa', glow: 'rgba(255,68,170,0.3)' },
+    { label: 'Ánimo', value: state.mood === 'feliz' ? '😊 Feliz' : '🤔 Pensativa', icon: Star, color: '#ffbb33', glow: 'rgba(255,187,51,0.3)' },
   ];
 
   return (
-    <div className="min-h-screen bg-[hsl(220,20%,4%)] text-white">
-      <div className="border-b border-gray-800 p-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Sparkles className="w-5 h-5 text-cyan-400" />
-          <h1 className="text-lg font-bold text-cyan-400">NexusAI Control Center</h1>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', color: '#fff', fontFamily: 'Inter' }}>
+      {/* Header */}
+      <div className="glass" style={{ padding: '20px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderRadius: 0, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ width: 52, height: 52, borderRadius: 16, background: 'linear-gradient(135deg, #00ddff, #9944ff)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 'bold', boxShadow: '0 0 30px rgba(0,221,255,0.4)' }}>
+            R
+          </div>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 800, background: 'linear-gradient(135deg, #00ddff, #ff44aa)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', margin: 0 }}>
+              NexusAI Control Center
+            </h1>
+            <p style={{ fontSize: 13, color: '#666', margin: '4px 0 0' }}>
+              ✦ Ecosistema de IA Autónoma — Rem Supervisora
+            </p>
+          </div>
         </div>
-        <div className="flex gap-3">
-          <Link to="/video" className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-pink-500/10 border border-pink-500/30 text-pink-400 text-sm">🎬 Video IA</Link>
-          <Link to="/chat" className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 text-sm">💬 Hablar con Rem</Link>
+        <div style={{ display: 'flex', gap: 12 }}>
+          <Link to="/chat" className="btn-cyber" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 8, fontSize: 14 }}>
+            <MessageSquare size={18} /> Hablar con Rem
+          </Link>
+          <Link to="/video" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 8, padding: '12px 24px', borderRadius: 14, fontSize: 14, fontWeight: 600, background: 'rgba(255,68,170,0.15)', border: '1px solid rgba(255,68,170,0.3)', color: '#ff44aa', transition: 'all 0.3s' }}>
+            <Film size={18} /> Video IA
+          </Link>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto p-6">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+      {/* Contenido */}
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 24px' }}>
+        {/* Stats */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 32 }}>
           {STATS.map(stat => {
             const Icon = stat.icon;
             return (
-              <div key={stat.label} className="bg-gray-900/50 border border-gray-800 rounded-xl p-4">
-                <Icon className={`w-5 h-5 ${stat.color} mb-2`} />
-                <div className={`text-xl font-bold ${stat.color}`}>{loading ? '—' : stat.value}</div>
-                <div className="text-xs text-gray-400">{stat.label}</div>
+              <div key={stat.label} className="glass-card" style={{ padding: 24, cursor: 'default' }}>
+                <div style={{ width: 44, height: 44, borderRadius: 12, background: `${stat.color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16, boxShadow: `0 0 20px ${stat.glow}` }}>
+                  <Icon size={22} color={stat.color} />
+                </div>
+                <div style={{ fontSize: 32, fontWeight: 800, color: stat.color, marginBottom: 4 }}>{stat.value}</div>
+                <div style={{ fontSize: 13, color: '#888' }}>{stat.label}</div>
               </div>
             );
           })}
         </div>
 
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4">
-            <h2 className="text-sm font-semibold mb-3 flex items-center gap-2"><Clock className="w-4 h-4 text-yellow-400" /> Tareas Recientes</h2>
-            {tasksArray.slice(0, 8).map(task => (
-              <div key={task.id} className="flex items-center gap-3 py-2 border-b border-gray-800 text-sm">
-                <div className={`w-2 h-2 rounded-full ${task.status === 'completed' ? 'bg-green-400' : 'bg-yellow-400'}`} />
-                <span className="flex-1 truncate">{task.title}</span>
-                {task.quality_score && <span className="text-yellow-400">★{task.quality_score.toFixed(1)}</span>}
-              </div>
-            ))}
-          </div>
+        {/* Tareas recientes */}
+        <div className="glass-card" style={{ padding: 24, marginBottom: 24 }}>
+          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <Activity size={20} color="#00ddff" /> Actividad Reciente
+          </h2>
+          {tasks.length === 0 ? (
+            <p style={{ color: '#666', textAlign: 'center', padding: 40 }}>Sin actividad aún. ¡Habla con Rem para empezar!</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {tasks.slice(0, 8).map(task => (
+                <div key={task.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', background: 'rgba(255,255,255,0.02)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.04)' }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: task.type === 'video' ? '#ff44aa' : task.type === 'image' ? '#ffbb33' : '#00ddff' }} />
+                  <span style={{ flex: 1, fontSize: 14, color: '#ccc' }}>{task.title || 'Sin título'}</span>
+                  <span style={{ fontSize: 11, color: '#555', background: 'rgba(255,255,255,0.05)', padding: '4px 10px', borderRadius: 8 }}>
+                    {task.type?.toUpperCase() || 'TEXT'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
-          <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4">
-            <h2 className="text-sm font-semibold mb-3 flex items-center gap-2"><Shield className="w-4 h-4 text-cyan-400" /> Últimos Eventos</h2>
-            {Array.isArray(logs) && logs.slice(0, 8).map(log => (
-              <div key={log.id} className="py-2 border-b border-gray-800 text-sm">
-                <span className="text-cyan-400 font-medium">{log.agent_name}</span>
-                <span className="text-gray-500 mx-2">{log.action}</span>
-                <p className="text-gray-400 text-xs truncate">{log.details}</p>
-              </div>
-            ))}
-          </div>
+        {/* Footer */}
+        <div style={{ textAlign: 'center', padding: 32, color: '#444', fontSize: 13 }}>
+          ✦ Rem — IA 100% Independiente · Sin créditos · Sin APIs externas · v1.0
         </div>
       </div>
     </div>
